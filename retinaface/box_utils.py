@@ -228,6 +228,33 @@ def decode(
     return boxes
 
 
+def decode_batch(
+    loc: torch.Tensor, priors: torch.Tensor, variances: Union[List[float], Tuple[float, float]]
+) -> torch.Tensor:
+    """Decodes locations from predictions using priors to undo the encoding we did for offset regression at train time.
+
+    Args:
+        loc: location predictions for loc layers,
+            Shape: [num_batch, num_priors, 4]
+        priors: Prior boxes in center-offset form.
+            Shape: [num_priors, 4].
+        variances: Variances of priorboxes
+    Return:
+        decoded bounding box predictions
+    """
+    batch_priors = priors[None, :, :].expand(loc.shape[0], -1, -1)
+    boxes = torch.cat(
+        (
+            batch_priors[:, :, :2] + loc[:, :, :2] * variances[0] * batch_priors[:, :, 2:],
+            batch_priors[:, :, 2:] * torch.exp(loc[:, :, 2:] * variances[1]),
+        ),
+        2,
+    )
+    boxes[:, :, :2] -= boxes[:, :, 2:] / 2
+    boxes[:, :, 2:] += boxes[:, :, :2]
+    return boxes
+
+
 def decode_landm(
     pre: torch.Tensor, priors: torch.Tensor, variances: Union[List[float], Tuple[float, float]]
 ) -> torch.Tensor:
@@ -251,6 +278,33 @@ def decode_landm(
             priors[:, :2] + pre[:, 8:10] * variances[0] * priors[:, 2:],
         ),
         dim=1,
+    )
+
+
+def decode_landm_batch(
+    pre: torch.Tensor, priors: torch.Tensor, variances: Union[List[float], Tuple[float, float]]
+) -> torch.Tensor:
+    """Decodes landmarks from predictions using priors to undo the encoding we did for offset regression at train time.
+
+    Args:
+        pre: landmark predictions for loc layers,
+            Shape: [num_batch, num_priors, 10]
+        priors: Prior boxes in center-offset form.
+            Shape: [num_priors, 4].
+        variances: Variances of priorboxes
+    Return:
+        decoded landmark predictions
+    """
+    batch_priors = priors[None, :, :].expand(pre.shape[0], -1, -1)
+    return torch.cat(
+        (
+            batch_priors[:, :, :2] + pre[:, :, :2] * variances[0] * batch_priors[:, :, 2:],
+            batch_priors[:, :, :2] + pre[:, :, 2:4] * variances[0] * batch_priors[:, :, 2:],
+            batch_priors[:, :, :2] + pre[:, :, 4:6] * variances[0] * batch_priors[:, :, 2:],
+            batch_priors[:, :, :2] + pre[:, :, 6:8] * variances[0] * batch_priors[:, :, 2:],
+            batch_priors[:, :, :2] + pre[:, :, 8:10] * variances[0] * batch_priors[:, :, 2:],
+        ),
+        dim=2,
     )
 
 

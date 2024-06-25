@@ -6,7 +6,7 @@ import torch
 from torch.nn import functional as F
 from torchvision.ops import nms
 
-from retinaface.box_utils import decode, decode_landm
+from retinaface.box_utils import decode_batch, decode_landm_batch
 from retinaface.network import RetinaFace
 from retinaface.prior_box import priorbox
 from retinaface.transform import Transformer, clip_boxes
@@ -37,17 +37,22 @@ class Model:
     def predict_jsons(
         self, image: torch.tensor, confidence_threshold: float = 0.7, nms_threshold: float = 0.4
     ) -> List[Dict[str, Union[List, float]]]:
+        assert len(image.shape) == 4, f"image tensor {image.shape} is not in BxCxHxW dimension"
+        # import pdb; pdb.set_trace()
         with torch.no_grad():
-            original_height, original_width = image.shape[1:]
+            original_height, original_width = image.shape[-2:]
 
             transformed_image = self.transform(image=image)
 
-            transformed_height, transformed_width = transformed_image.shape[1:]
+            transformed_height, transformed_width = transformed_image.shape[-2:]
             transformed_size = (transformed_width, transformed_height)
 
-            scale_landmarks = torch.tensor(transformed_size).tile((5,)).to(self.device)
+            scale_landmarks = torch.tensor(transformed_size)\
+                                   .tile((5,)).reshape(5, 2).to(self.device)
             scale_bboxes = torch.tensor(transformed_size).tile((2,)).to(self.device)
+            resize_coeff = original_height / transformed_height
 
+            # prior_box shape Px4
             prior_box = priorbox(
                 min_sizes=[[16, 32], [64, 128], [256, 512]],
                 steps=[8, 16, 32],
@@ -55,58 +60,66 @@ class Model:
                 image_size=(transformed_height, transformed_width),
             ).to(self.device)
 
-            torched_image = transformed_image
+            # Due to CUDA memory limit, can not infer in batch
+            locs, confs, lands = [], [], []
+            for torched_image in transformed_image:
+                # shapes loc 1xPx4, confs 1xPx2, lands 1xPx10
+                loc, conf, land = self.model(torched_image.unsqueeze(0))
+                locs.append(loc)
+                confs.append(conf)
+                lands.append(land)
 
-            loc, conf, land = self.model(torched_image.unsqueeze(0))  # pylint: disable=E1102
+            # shapes batch_boxes BxPx4, batch_landmarks BxPx10, batch_scores BxP
+            batch_boxes = decode_batch(torch.cat(locs, dim=0), prior_box, self.variance)
+            batch_landmarks = decode_landm_batch(
+                torch.cat(lands, dim=0),
+                prior_box,
+                self.variance,
+            ).reshape(-1, prior_box.shape[0], 5, 2)
+            batch_scores = F.softmax(torch.cat(confs, dim=0), dim=-1)[:,:,1]
+            batch_ids, valid_indeces = torch.where(batch_scores > confidence_threshold)
 
-            conf = F.softmax(conf, dim=-1)
+            results = []
+            for batch_id, (boxes, scores, landmarks) in enumerate(
+                    zip(batch_boxes,
+                        batch_scores,
+                        batch_landmarks)
+            ):
+                # valid_index = torch.where(scores > confidence_threshold)[0]
+                valid_index = valid_indeces[torch.where(batch_ids == batch_id)[0]]
 
-            boxes = decode(loc.data[0], prior_box, self.variance)
+                # get low score filter-outed data
+                scores = scores[valid_index]
+                boxes = boxes[valid_index] * scale_bboxes
 
-            boxes *= scale_bboxes
-            scores = conf[0][:, 1]
+                # do NMS
+                keep = nms(boxes, scores, nms_threshold)
+                boxes = boxes[keep]
 
-            landmarks = decode_landm(land.data[0], prior_box, self.variance)
-            landmarks *= scale_landmarks
+                if boxes.shape[0] > 0:
+                    scores = scores[keep].round(decimals=ROUNDING_DIGITS)#.cpu()
+                    landmarks = (
+                        landmarks[valid_index][keep] * scale_landmarks * resize_coeff
+                    ).round(decimals=ROUNDING_DIGITS)#.cpu()
+                    boxes = clip_boxes(
+                        boxes,#.cpu(),
+                        image_width=original_width,
+                        image_height=original_height,
+                        resize_coeff=resize_coeff,
+                    ).round(decimals=ROUNDING_DIGITS)
 
-            # ignore low scores
-            valid_index = torch.where(scores > confidence_threshold)[0]
-            boxes = boxes[valid_index]
-            landmarks = landmarks[valid_index]
-            scores = scores[valid_index]
+                    annotations = [
+                        {
+                            "bbox": [x_min, y_min, x_max, y_max],
+                            "score": score,
+                            "landmarks": landmark.tolist(),
+                        }
+                        for score, (x_min, y_min, x_max, y_max), landmark \
+                        in zip(scores, boxes, landmarks) \
+                        if x_min < x_max and y_min < y_max
+                    ]
+                else:
+                    annotations = [{"bbox": [], "score": -1, "landmarks": []}]
+                results.append(annotations)
 
-            # do NMS
-            keep = nms(boxes, scores, nms_threshold)
-            boxes = boxes[keep, :]
-
-            if boxes.shape[0] == 0:
-                return [{"bbox": [], "score": -1, "landmarks": []}]
-
-            landmarks = landmarks[keep]
-
-            resize_coeff = original_height / transformed_height
-            scores = scores[keep].round(decimals=ROUNDING_DIGITS).cpu()
-            landmarks = (landmarks.reshape(-1, 10) * resize_coeff)\
-                .round(decimals=ROUNDING_DIGITS)\
-                .reshape(-1, 5, 2)\
-                .cpu()
-            boxes = clip_boxes(boxes.cpu(),
-                               image_width=original_width,
-                               image_height=original_height,
-                               resize_coeff=resize_coeff).round(decimals=ROUNDING_DIGITS)
-
-            annotations: List[Dict[str, Union[List, float]]] = []
-
-            # import pdb; pdb.set_trace()
-            for score, bbox, landmark in zip(scores, boxes, landmarks):
-                x_min, y_min, x_max, y_max = bbox
-                if x_min >= x_max or y_min >= y_max:
-                    continue
-                annotations += [
-                    {
-                        "bbox": bbox.tolist(),
-                        "score": score,
-                        "landmarks": landmark.tolist(),
-                    }
-                ]
-            return annotations
+            return results
