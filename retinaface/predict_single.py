@@ -17,7 +17,7 @@ ROUNDING_DIGITS = 2
 
 
 class Model:
-    def __init__(self, max_size: int = 960, device: str = "cpu") -> None:
+    def __init__(self, max_size: int = 960, device: str = None) -> None:
         self.model = RetinaFace(
             name="Resnet50",
             pretrained=False,
@@ -25,7 +25,10 @@ class Model:
             in_channels=256,
             out_channels=256,
         ).to(device)
-        self.device = device
+        if device is None:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device = device
         self.transform = A.Compose([A.LongestMaxSize(max_size=max_size, p=1), A.Normalize(p=1)])
         self.max_size = max_size
         self.variance = [0.1, 0.2]

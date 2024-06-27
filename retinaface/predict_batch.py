@@ -23,8 +23,11 @@ class Model:
             in_channels=256,
             out_channels=256,
         ).to(device)
-        self.device = device
-        self.transform = Transformer(max_size=max_size)
+        if device is None:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device = device
+        self.transform = Transformer(max_size=max_size, device=self.device)
         self.max_size = max_size
         self.variance = [0.1, 0.2]
 

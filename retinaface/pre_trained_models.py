@@ -22,15 +22,25 @@ def get_model(model_name: str,
               max_size: int,
               batch_model: bool = False,
               model_dir: Path = None,
-              device: str = "cpu",
+              device: str = None,
               quiet: bool = False,
 ):
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     if batch_model:
         model = models[model_name].model["batch"](max_size=max_size, device=device)
     else:
         model = models[model_name].model["single"](max_size=max_size, device=device)
     weight_file = cached_path(models[model_name].url, cache_dir=model_dir.resolve(), quiet=quiet)
-    state_dict = torch.load(weight_file, map_location=lambda storage, loc: storage)
+    if device == "cpu":
+        state_dict = torch.load(
+            weight_file,
+            map_location=lambda storage, loc: storage,
+        )
+    else:
+        state_dict = torch.load(
+            weight_file,
+            map_location=lambda storage, loc: storage.cuda(torch.cuda.current_device()),
+        )
     model.load_state_dict(state_dict)
-
     return model

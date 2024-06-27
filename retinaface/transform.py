@@ -75,15 +75,23 @@ print(f"cost {perf_counter() - ts}")
     """
     boxes *= resize_coeff
     boxes_num = boxes.shape[0]
-    x_min_clip_down = torch.zeros(boxes_num, dtype=torch.int)
-    x_min_clip_up   = torch.ones(boxes_num, dtype=torch.int) * (image_width - 1)
+    x_min_clip_down = torch.zeros(boxes_num, dtype=torch.int, device=boxes.device)
+    x_min_clip_up   = torch.ones(boxes_num,
+                                 dtype=torch.int,
+                                 device=boxes.device) * (image_width - 1)
     x_max_clip_down = boxes[:,0] + 1
-    x_max_clip_up   = torch.ones(boxes_num, dtype=torch.int) * image_width
+    x_max_clip_up   = torch.ones(boxes_num,
+                                 dtype=torch.int,
+                                 device=boxes.device) * image_width
 
-    y_min_clip_down = torch.zeros(boxes_num, dtype=torch.int)
-    y_min_clip_up   = torch.ones(boxes_num, dtype=torch.int) * (image_height - 1)
+    y_min_clip_down = torch.zeros(boxes_num, dtype=torch.int, device=boxes.device)
+    y_min_clip_up   = torch.ones(boxes_num,
+                                 dtype=torch.int,
+                                 device=boxes.device) * (image_height - 1)
     y_max_clip_down = boxes[:,1] + 1
-    y_max_clip_up   = torch.ones(boxes_num, dtype=torch.int) * image_height
+    y_max_clip_up   = torch.ones(boxes_num,
+                                 dtype=torch.int,
+                                 device=boxes.device) * image_height
 
     return boxes.clip(min=torch.stack([x_min_clip_down, y_min_clip_down,
                                        x_max_clip_down, y_max_clip_down], dim=1),
