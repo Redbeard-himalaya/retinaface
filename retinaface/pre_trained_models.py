@@ -21,6 +21,8 @@ models = {
 def get_model(model_name: str,
               max_size: int,
               batch_model: bool = False,
+              batch_width: int = None,
+              batch_height: int = None,
               model_dir: Path = None,
               device: str = None,
               quiet: bool = False,
@@ -28,7 +30,10 @@ def get_model(model_name: str,
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     if batch_model:
-        model = models[model_name].model["batch"](max_size=max_size, device=device)
+        model = models[model_name].model["batch"](max_size=max_size,
+                                                  batch_width=batch_width,
+                                                  batch_height=batch_height,
+                                                  device=device)
     else:
         model = models[model_name].model["single"](max_size=max_size, device=device)
     weight_file = cached_path(models[model_name].url, cache_dir=model_dir.resolve(), quiet=quiet)
