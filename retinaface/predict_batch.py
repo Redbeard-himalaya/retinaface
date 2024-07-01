@@ -21,6 +21,7 @@ class Model:
                  batch_height: int = None,
                  device: str = None,
                  confidence_threshold: float = 0.7,
+                 nms_threshold: float = 0.4,
     ) -> None:
         self.model = RetinaFace(
             name="Resnet50",
@@ -36,6 +37,7 @@ class Model:
         self.transform = Transformer(max_size=max_size, device=self.device)
         self.variance = torch.tensor([0.1, 0.2], device=self.device)
         self.confidence_threshold = torch.tensor(confidence_threshold, device=self.device)
+        self.nms_threshold = torch.tensor(nms_threshold, device=self.device)
         self.original_width = torch.tensor(batch_width, device=self.device)
         self.original_height = torch.tensor(batch_height, device=self.device)
         transformed_height, transformed_width = self.transform(
@@ -59,9 +61,7 @@ class Model:
     def eval(self) -> None:  # noqa: A003
         self.model.eval()
 
-    def predict_jsons(
-        self, image: torch.tensor, confidence_threshold: float = 0.7, nms_threshold: float = 0.4
-    ) -> List[Dict[str, Union[List, float]]]:
+    def predict_jsons(self, image: torch.tensor) -> List[Dict[str, Union[List, float]]]:
         # torch cuda time measure
         # https://discuss.pytorch.org/t/how-to-measure-time-in-pytorch/26964
         # how does torch cuda behavior
@@ -90,7 +90,7 @@ class Model:
                 self.variance,
             ).reshape(-1, self.batch_prior_box.shape[0], 5, 2)
             batch_scores = F.softmax(torch.cat(confs, dim=0), dim=-1)[:,:,1]
-            batch_ids, valid_indeces = torch.where(batch_scores > confidence_threshold)
+            batch_ids, valid_indeces = torch.where(batch_scores > self.confidence_threshold)
 
             results = []
             for batch_id, (boxes, scores, landmarks) in enumerate(
@@ -106,7 +106,7 @@ class Model:
                 boxes = boxes[valid_index] * self.scale_bboxes
 
                 # do NMS
-                keep = nms(boxes, scores, nms_threshold)
+                keep = nms(boxes, scores, self.nms_threshold)
                 boxes = boxes[keep]
 
                 if boxes.shape[0] > 0:
