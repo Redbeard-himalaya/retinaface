@@ -62,12 +62,15 @@ class Model:
     def predict_jsons(
         self, image: torch.tensor, confidence_threshold: float = 0.7, nms_threshold: float = 0.4
     ) -> List[Dict[str, Union[List, float]]]:
-
+        # torch cuda time measure
+        # https://discuss.pytorch.org/t/how-to-measure-time-in-pytorch/26964
+        # how does torch cuda behavior
+        # https://discuss.pytorch.org/t/escaping-if-statement-synchronization/130263/5
         if image.dim() != 4:
             raise ValueError(f"image tensor {image.shape} is not in BxCxHxW dimension")
 
         # import pdb; pdb.set_trace()
-        with torch.no_grad():
+        with torch.inference_mode():
             transformed_image = self.transform(image=image)
 
             # Due to CUDA memory limit, can not infer in batch
