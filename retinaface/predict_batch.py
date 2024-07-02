@@ -98,8 +98,7 @@ class Model:
                         batch_scores,
                         batch_landmarks)
             ):
-                # valid_index = torch.where(scores > confidence_threshold)[0]
-                valid_index = valid_indeces[torch.where(batch_ids == batch_id)[0]]
+                valid_index = valid_indeces[torch.where(batch_ids == batch_id)]
 
                 # get low score filter-outed data
                 scores = scores[valid_index]
@@ -132,7 +131,7 @@ class Model:
                         if x_min < x_max and y_min < y_max
                     ]
                 else:
-                    annotations = [{"bbox": [], "score": -1, "landmarks": []}]
+                    annotations = []
                 results.append(annotations)
 
             return results
