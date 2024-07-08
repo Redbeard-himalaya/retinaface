@@ -21,17 +21,17 @@ class Model:
                  batch_height: int = None,
                  device: str = None,
     ) -> None:
+        if device is None:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device = device
         self.model = RetinaFace(
             name="Resnet50",
             pretrained=False,
             return_layers={"layer2": 1, "layer3": 2, "layer4": 3},
             in_channels=256,
             out_channels=256,
-        ).to(device)
-        if device is None:
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        else:
-            self.device = device
+        ).to(device=self.device)
         self.transform = Transformer(max_size=max_size, device=self.device)
         self.variance = torch.tensor([0.1, 0.2], device=self.device)
         self.original_width = torch.tensor(batch_width, device=self.device)
@@ -242,7 +242,7 @@ class Model:
             confidence_threshold: float = 0.7,
             nms_threshold: float = 0.4,
     ) -> List[Dict[str, Union[List, float]]]:
-        # test against 2048 max_size, 180 batch_size, achive 0.16s/f, vRAM usage 15.7G
+        # test against 2048 max_size, 180 batch_size, achive 0.10s/f, vRAM usage 14.7G
         # torch cuda time measure
         # https://discuss.pytorch.org/t/how-to-measure-time-in-pytorch/26964
         # how does torch cuda behavior
@@ -251,7 +251,9 @@ class Model:
             raise ValueError(f"image tensor {image.shape} is not in BxCxHxW dimension")
 
         # import pdb; pdb.set_trace()
-        with torch.inference_mode():
+        with (torch.autocast(device_type=self.device, enabled=(self.device=="cuda")),
+              torch.inference_mode(),
+        ):
             transformed_image = self.transform(image=image)
 
             # Due to CUDA memory limit, can not infer in batch
