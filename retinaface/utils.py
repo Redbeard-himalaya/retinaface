@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 
 import cv2
 import numpy as np
@@ -28,3 +28,33 @@ def vis_annotations(image: np.ndarray, annotations: List[Dict[str, Any]]) -> np.
 def tensor_from_rgb_image(image: np.ndarray) -> torch.Tensor:
     image = np.ascontiguousarray(np.transpose(image, (2, 0, 1)))
     return torch.from_numpy(image)
+
+
+def process_predictions(
+        batch_num: int,
+        batches: torch.Tensor,
+        boxes: torch.Tensor,
+        landmarks: torch.Tensor,
+        scores: torch.Tensor,
+) -> List[List[Dict[str, Union[List, float]]]]:
+    results = []
+    for batch_id in range(batch_num):
+        idx = torch.where(batches == batch_id)
+        _boxes = boxes[idx]
+        _scores = scores[idx]
+        _landmarks = landmarks[idx]
+        if _boxes.shape[0] > 0:
+            annotations = [
+                {
+                    "bbox": [x_min, y_min, x_max, y_max],
+                    "score": score,
+                    "landmarks": landmark.tolist(),
+                }
+                for score, (x_min, y_min, x_max, y_max), landmark \
+                in zip(_scores, _boxes, _landmarks) \
+                if x_min < x_max and y_min < y_max
+            ]
+        else:
+            annotations = []
+        results.append(annotations)
+    return results

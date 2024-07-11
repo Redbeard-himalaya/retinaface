@@ -302,24 +302,6 @@ class Model:
                 * self.scale_landmarks * self.resize_coeff
             ).round(decimals=ROUNDING_DIGITS)
 
-            results = []
-            for batch_id in range(batch_num):
-                idx = torch.where(valid_batches == batch_id)
-                boxes = valid_boxes[idx]
-                scores = valid_scores[idx]
-                landmarks = valid_landmarks[idx]
-                if boxes.shape[0] > 0:
-                    annotations = [
-                        {
-                            "bbox": [x_min, y_min, x_max, y_max],
-                            "score": score,
-                            "landmarks": landmark.tolist(),
-                        }
-                        for score, (x_min, y_min, x_max, y_max), landmark \
-                        in zip(scores, boxes, landmarks) \
-                        if x_min < x_max and y_min < y_max
-                    ]
-                else:
-                    annotations = []
-                results.append(annotations)
-            return results
+            # batches is used as index so good on cpu
+            # boxes is used to crop and tag targate so good on cpu
+            return valid_batches.cpu(), valid_boxes.cpu(), valid_landmarks, valid_scores
