@@ -2,14 +2,11 @@ from typing import Tuple
 
 import torch
 from torch.nn import functional as F
-from torchvision.transforms.v2 import ConvertBoundingBoxFormat
-from torchvision import tv_tensors
 from torchvision.transforms.functional import resized_crop
 
+#@torch.jit.script
 class Extractor:
-    def __init__(self, width: int, height: int, resize: Tuple[int]):
-        self.bbox_convert = ConvertBoundingBoxFormat(format="XYWH")
-        self.canvas_size = (height, width)
+    def __init__(self, resize: Tuple[int]):
         self.resize = resize
 
     def __call__(self,
@@ -36,14 +33,6 @@ class Extractor:
             raise ValueError(f"images {images.shape} is not in NxCxHxW shape")
         if bboxes.shape[0] != batch_ids.shape[0]:
             raise ValueError(f"bboxes {bboxes.shape} num does not equal to batch_ids {batch_ids.shape} num")
-        bboxes = self.bbox_convert(
-            tv_tensors.BoundingBoxes(
-                bboxes,
-                format=tv_tensors.BoundingBoxFormat.XYXY,
-                canvas_size=self.resize,
-                dtype=torch.int,
-            )
-        )
         # resized_crop is faster against float32 images
         images = images.to(torch.float32)
         # crops in shape: BATCH_IDS.NUM x RESIZE x RESIZE, dtype: float32

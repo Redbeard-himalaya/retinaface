@@ -297,6 +297,8 @@ class Model:
                 image_height=self.original_height,
                 resize_coeff=self.resize_coeff,
             ).round(decimals=ROUNDING_DIGITS)
+            # convert format XYXY to XYWH
+            valid_boxes[:,[2,3]] = valid_boxes[:,[2,3]] - valid_boxes[:,[0,1]]
             valid_landmarks = (
                 batch_landmarks[highscore_batches, highscore_indeces][keep] \
                 * self.scale_landmarks * self.resize_coeff
@@ -304,4 +306,4 @@ class Model:
 
             # batches is used as index so good on cpu
             # boxes is used to crop and tag targate so good on cpu
-            return valid_batches.cpu(), valid_boxes.cpu(), valid_landmarks, valid_scores
+            return valid_batches.cpu(), valid_boxes.to(torch.int).cpu(), valid_landmarks, valid_scores
