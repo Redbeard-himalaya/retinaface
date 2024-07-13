@@ -43,7 +43,7 @@ class LandmarkHead(nn.Module):
 
 class RetinaFace(nn.Module):
     def __init__(
-        self, name: str, pretrained: bool, in_channels: int, return_layers: Dict[str, int], out_channels: int
+        self, name: str, pretrained: bool, in_channels: int, return_layers: Dict[str, str], out_channels: int
     ) -> None:
         super().__init__()
 
@@ -99,13 +99,16 @@ class RetinaFace(nn.Module):
         fpn = self.fpn(out)
 
         # SSH
-        feature1 = self.ssh1(fpn[0])
-        feature2 = self.ssh2(fpn[1])
-        feature3 = self.ssh3(fpn[2])
-        features = [feature1, feature2, feature3]
-
-        bbox_regressions = torch.cat([self.BboxHead[i](feature) for i, feature in enumerate(features)], dim=1)
-        classifications = torch.cat([self.ClassHead[i](feature) for i, feature in enumerate(features)], dim=1)
-        ldm_regressions = torch.cat([self.LandmarkHead[i](feature) for i, feature in enumerate(features)], dim=1)
-
+        feature0 = self.ssh1(fpn[0])
+        feature1 = self.ssh2(fpn[1])
+        feature2 = self.ssh3(fpn[2])
+        bbox_regressions = torch.cat([self.BboxHead[0](feature0),
+                                      self.BboxHead[1](feature1),
+                                      self.BboxHead[2](feature2)], dim=1)
+        classifications = torch.cat([self.ClassHead[0](feature0),
+                                     self.ClassHead[1](feature1),
+                                     self.ClassHead[2](feature2)], dim=1)
+        ldm_regressions = torch.cat([self.LandmarkHead[0](feature0),
+                                     self.LandmarkHead[1](feature1),
+                                     self.LandmarkHead[2](feature2)], dim=1)
         return bbox_regressions, classifications, ldm_regressions

@@ -45,7 +45,7 @@ class SSH(nn.Module):
         if out_channel % 4 != 0:
             raise ValueError(f"Expect out channel % 4 == 0, but we got {out_channel % 4}")
 
-        leaky: float = 0
+        leaky: float = 0.0
         if out_channel <= 64:
             leaky = 0.1
         self.conv3X3 = conv_bn_no_relu(in_channel, out_channel // 2, stride=1)

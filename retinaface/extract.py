@@ -1,14 +1,13 @@
-from typing import Tuple
-
 import torch
 from torch.nn import functional as F
 from torchvision.transforms.functional import resized_crop
 
-#@torch.jit.script
+@torch.jit.script
 class Extractor:
-    def __init__(self, resize: Tuple[int]):
+    def __init__(self, resize: int):
         self.resize = resize
 
+    @torch.inference_mode
     def __call__(self,
                  images: torch.Tensor,
                  bboxes: torch.Tensor,
@@ -36,20 +35,19 @@ class Extractor:
         # resized_crop is faster against float32 images
         images = images.to(torch.float32)
         # crops in shape: BATCH_IDS.NUM x RESIZE x RESIZE, dtype: float32
-        crops = images.new_empty((bboxes.shape[0], 3) + self.resize)
-        empty_crop = images.new_empty((0, 3) + self.resize)
+        crops = images.new_empty((bboxes.shape[0], 3) + (self.resize,self.resize))
+        empty_crop = images.new_empty((0, 3) + (self.resize,self.resize))
         # import pdb; pdb.set_trace()
         for i, image in enumerate(images):
             _crops = [empty_crop]
             idx = torch.where(batch_ids == i)
-            for x, y, w, h in bboxes[idx]:
-                # croped image is in dtype.uint8
+            for box in bboxes[idx]:
+                x, y, w, h = box[0], box[1], box[2], box[3]
                 _crops.append(
                     resized_crop(img=image,
                                  left=x, top=y, width=w, height=h,
-                                 size=self.resize).unsqueeze(0)
+                                 size=[self.resize,self.resize]).unsqueeze(0)
                 )
-            # torch.cat autocast uint8 to float32 because empty_crop.dtype==float32
             crops[idx] = torch.cat(_crops, dim=0)
         # alignment require crops.dtype in torch.float32, otherwise fails at affine_grid
         return self.alignment(crops, landmarks)
@@ -58,7 +56,7 @@ class Extractor:
     def alignment(self,
                   img: torch.Tensor,
                   landmark: torch.Tensor,
-    ) -> Tuple[torch.Tensor, float, int]:
+    ) -> torch.Tensor:
         """
         Alignma given face with respect to the left and right eye coordinates.
         Left eye is the eye appearing on the left (right eye of the person). Left top point is (0, 0)
@@ -122,7 +120,7 @@ class Extractor:
             batch of rotated images
         """
         if x.dim() != 4:
-            raise TypeError(f"param x ({img.dim()}D) is not in 4D")
+            raise TypeError(f"param x ({x.dim()}D) is not in 4D")
         angle = degree / 180 * torch.pi
         s = torch.sin(angle)
         c = torch.cos(angle)

@@ -1,6 +1,6 @@
 """There is a lot of post processing of the predictions."""
 from collections import OrderedDict
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Tuple
 
 import torch
 from torch.nn import functional as F
@@ -28,7 +28,7 @@ class Model:
         self.model = RetinaFace(
             name="Resnet50",
             pretrained=False,
-            return_layers={"layer2": 1, "layer3": 2, "layer4": 3},
+            return_layers={"layer2": '1', "layer3": '2', "layer4": '3'},
             in_channels=256,
             out_channels=256,
         ).to(device=self.device)
@@ -60,7 +60,12 @@ class Model:
         self.model.load_state_dict(state_dict)
 
     def eval(self) -> None:  # noqa: A003
-        self.model.eval()
+        if self.device == "cpu":
+            self.model = torch.jit.optimize_for_inference(torch.jit.script(self.model.eval()))
+        else:
+            # torch.jit.optimize_for_inference fails on GPU
+            # https://discuss.pytorch.org/t/using-optimize-for-inference-on-torchscript-model-causes-error/196384/1
+            self.model = torch.jit.script(self.model.eval())
 
 
     def predict_jsons_origin_cpu(
@@ -236,12 +241,14 @@ class Model:
             return results
 
 
+    @torch.inference_mode
+    @torch.jit.optimized_execution(True)
     def predict_jsons(
             self,
-            image: torch.tensor,
+            image: torch.Tensor,
             confidence_threshold: float = 0.7,
             nms_threshold: float = 0.4,
-    ) -> List[Dict[str, Union[List, float]]]:
+    ) -> Tuple[torch.Tensor]:
         # test against 2048 max_size, 180 batch_size, achive 0.10s/f, vRAM usage 14.7G
         # torch cuda time measure
         # https://discuss.pytorch.org/t/how-to-measure-time-in-pytorch/26964
@@ -251,9 +258,7 @@ class Model:
             raise ValueError(f"image tensor {image.shape} is not in BxCxHxW dimension")
 
         # import pdb; pdb.set_trace()
-        with (torch.autocast(device_type=self.device, enabled=(self.device=="cuda")),
-              torch.inference_mode(),
-        ):
+        with torch.autocast(device_type=str(self.device), enabled=(self.device=="cuda")):
             transformed_image = self.transform(image=image)
 
             # Due to CUDA memory limit, can not infer in batch
