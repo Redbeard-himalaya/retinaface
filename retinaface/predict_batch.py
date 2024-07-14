@@ -311,4 +311,4 @@ class Model:
 
             # batches is used as index so good on cpu
             # boxes is used to crop and tag targate so good on cpu
-            return valid_batches.cpu(), valid_boxes.to(torch.int).cpu(), valid_landmarks, valid_scores
+            return valid_batches.cpu(), valid_boxes.cpu(), valid_landmarks, valid_scores

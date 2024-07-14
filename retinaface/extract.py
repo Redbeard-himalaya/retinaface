@@ -1,11 +1,13 @@
 import torch
 from torch.nn import functional as F
+# from torchvision.ops import clip_boxes_to_image
 from torchvision.transforms.functional import resized_crop
 
 @torch.jit.script
 class Extractor:
-    def __init__(self, resize: int):
+    def __init__(self, resize: int, margin: int):
         self.resize = resize
+        self.margin = margin
 
     @torch.inference_mode
     def __call__(self,
@@ -34,6 +36,15 @@ class Extractor:
             raise ValueError(f"bboxes {bboxes.shape} num does not equal to batch_ids {batch_ids.shape} num")
         # resized_crop is faster against float32 images
         images = images.to(torch.float32)
+        # bboxes = self.add_bboxes_margin(images=images,
+        #                                 bboxes=bboxes,
+        #                                 margin=self.margin,
+        #                                 resize=self.resize).to(torch.int)
+        self.add_bboxes_margin(bboxes=bboxes,
+                               images=images,
+                               margin=self.margin,
+                               resize=self.resize)
+        bboxes = bboxes.to(torch.int)
         # crops in shape: BATCH_IDS.NUM x RESIZE x RESIZE, dtype: float32
         crops = images.new_empty((bboxes.shape[0], 3) + (self.resize,self.resize))
         empty_crop = images.new_empty((0, 3) + (self.resize,self.resize))
@@ -50,7 +61,56 @@ class Extractor:
                 )
             crops[idx] = torch.cat(_crops, dim=0)
         # alignment require crops.dtype in torch.float32, otherwise fails at affine_grid
-        return self.alignment(crops, landmarks)
+        return self.alignment(crops, landmarks)#, bboxes
+
+
+    # def add_bboxes_margin(self,
+    #                       images: torch.Tensor,
+    #                       bboxes: torch.Tensor,
+    #                       margin: int = 0,
+    #                       resize: int = 160,
+    # )-> torch.Tensor:
+    #     """bboxes in format XYWH
+    #     """
+    #     h, w = images.shape[-2:]
+    #     bb = bboxes.clone()
+    #     ratio = 0.5 * margin / (resize - margin)
+    #     # bb in format XYWH
+    #     m = bb[:,[2,3]] * ratio
+    #     # convert bb to format XYXY
+    #     bb[:,[2,3]] = bb[:,[0,1]] + bb[:,[2,3]] + m
+    #     bb[:,[0,1]] -= m
+    #     bb = clip_boxes_to_image(boxes=bb, size=(h,w))
+    #     # convert bb format back to XYWH
+    #     bb[:,[2,3]] -= bb[:,[0,1]]
+    #     return bb
+
+
+    def add_bboxes_margin(self,
+                          bboxes: torch.Tensor,
+                          images: torch.Tensor,
+                          margin: int = 0,
+                          resize: int = 160,
+    ):
+        """bboxes in format XYWH
+           bboxes is modified by this function
+           the above old one is deprecated because torchvision.ops.clip_boxes_to_image
+           cause a lot of VRAM and slow down.
+        """
+        h, w = images.shape[-2:]
+        #bb = bboxes
+        ratio = 0.5 * margin / (resize - margin)
+        # bboxes in format XYWH
+        m = bboxes[:,[2,3]] * ratio
+        # convert bboxes to format XYXY
+        bboxes[:,[2,3]] = bboxes[:,[0,1]] + bboxes[:,[2,3]] + m
+        bboxes[:,[0,1]] -= m
+        # clip x to [0, w]
+        bboxes[:,[0,2]] = bboxes[:,[0,2]].clip(min=0, max=w)
+        # clip y to [0, h]
+        bboxes[:,[1,3]] = bboxes[:,[1,3]].clip(min=0, max=h)
+        # convert bboxes format back to XYWH
+        bboxes[:,[2,3]] -= bboxes[:,[0,1]]
 
 
     def alignment(self,
