@@ -32,7 +32,7 @@ class Model:
             in_channels=256,
             out_channels=256,
         ).to(device=self.device)
-        self.transform = Transformer(max_size=max_size, device=self.device)
+        self.transform = Transformer(max_size=max_size)
         self.variance = torch.tensor([0.1, 0.2], device=self.device)
         self.original_width = torch.tensor(batch_width, device=self.device)
         self.original_width_cpu = self.original_width.cpu()

@@ -1,5 +1,5 @@
 import torch
-import torchvision.transforms as T
+import torchvision.transforms.v2 as T
 
 class Transformer:
     """This transformer replace albumentations equivalent:
@@ -8,13 +8,12 @@ class Transformer:
     transformed_image = transform(image=image)["image"]
     """
 
-    def __init__(self, max_size: int = 960, device: str = "cpu"):
+    def __init__(self, max_size: int = 960):
         # refer: https://albumentations.ai/docs/api_reference/full_reference/?h=normali#albumentations.augmentations.transforms.Normalize
-        max_pixel_value = 255.0
-        mean = torch.tensor((0.485, 0.456, 0.406)) # in RGB
-        std = torch.tensor((0.229, 0.224, 0.225))  # in RGB
-        self.mean = (mean * max_pixel_value).unsqueeze(-1).unsqueeze(-1).to(device)
-        self.rstd = (1 / (std * max_pixel_value)).unsqueeze(-1).unsqueeze(-1).to(device)
+        self.transform = T.Compose([
+            T.ToDtype(torch.float32, scale=True),
+            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
         self.rectangle_resizer = T.Resize(size=max_size-1, max_size=max_size)
         self.square_resizer = T.Resize(size=(max_size, max_size))
 
@@ -25,9 +24,9 @@ class Transformer:
         # refer https://stackoverflow.com/questions/51371070/how-does-pytorch-broadcasting-work
         height, width = image.shape[-2:]
         if height == width:
-            return (self.square_resizer(image) - self.mean) * self.rstd
+            return self.transform(self.square_resizer(image))
         else:
-            return (self.rectangle_resizer(image) - self.mean) * self.rstd
+            return self.transform(self.rectangle_resizer(image))
 
 
 def clip_boxes(boxes: torch.tensor,
