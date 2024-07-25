@@ -10,6 +10,7 @@ from retinaface.box_utils import decode_batch, decode_landm_batch
 from retinaface.network import RetinaFace
 from retinaface.prior_box import priorbox
 from retinaface.transform import Transformer, clip_boxes
+from retinaface.extract import Extractor
 
 ROUNDING_DIGITS = 2
 
@@ -19,6 +20,8 @@ class Model:
                  max_size: int = 960,
                  batch_width: int = None,
                  batch_height: int = None,
+                 face_size: int = 112,
+                 margin: int = 0,
                  device: str = None,
     ) -> None:
         if device is None:
@@ -33,6 +36,7 @@ class Model:
             out_channels=256,
         ).to(device=self.device)
         self.transform = Transformer(max_size=max_size)
+        self.extract = Extractor(resize=face_size, margin=margin)
         self.variance = torch.tensor([0.1, 0.2], device=self.device)
         self.original_width = torch.tensor(batch_width, device=self.device)
         self.original_width_cpu = self.original_width.cpu()
@@ -312,3 +316,19 @@ class Model:
             # batches is used as index so good on cpu
             # boxes is used to crop and tag targate so good on cpu
             return valid_batches.cpu(), valid_boxes.cpu(), valid_landmarks, valid_scores
+
+
+    def predict(
+            self,
+            image: torch.Tensor,
+            confidence_threshold: float = 0.7,
+            nms_threshold: float = 0.4,
+            
+    ) -> Tuple[torch.Tensor]:
+        """This is a wrapper of predict_jsons and extract
+        Params: image - torch.Tensor: a batch of images in shape BxCxHxW
+        """
+        batches, boxes, landmarks, scores = self.predict_jsons(image)
+        faces = self.extract(images=image, batch_ids=batches, bboxes=boxes, landmarks=landmarks)
+        return faces, batches, boxes, landmarks, scores
+

@@ -23,6 +23,8 @@ def get_model(model_name: str,
               batch_model: bool = False,
               batch_width: int = None,
               batch_height: int = None,
+              face_size: int = 112,
+              margin: int = 0,
               model_dir: Path = None,
               device: str = None,
               quiet: bool = False,
@@ -33,6 +35,8 @@ def get_model(model_name: str,
         model = models[model_name].model["batch"](max_size=max_size,
                                                   batch_width=batch_width,
                                                   batch_height=batch_height,
+                                                  face_size=face_size,
+                                                  margin=margin,
                                                   device=device)
     else:
         model = models[model_name].model["single"](max_size=max_size, device=device)
