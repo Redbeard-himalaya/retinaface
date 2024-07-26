@@ -5,7 +5,12 @@ from typing import List, Tuple
 import torch
 
 
-def priorbox(min_sizes: List[List[int]], steps: List[int], clip: bool, image_size: Tuple[int, int]) -> torch.Tensor:
+def priorbox(min_sizes: List[List[int]],
+             steps: List[int],
+             clip: bool,
+             image_size: Tuple[int, int],
+             device: str = "cpu",
+) -> torch.Tensor:
     feature_maps = [[ceil(image_size[0] / step), ceil(image_size[1] / step)] for step in steps]
 
     anchors: List[float] = []
@@ -21,7 +26,7 @@ def priorbox(min_sizes: List[List[int]], steps: List[int], clip: bool, image_siz
                     anchors += [cx, cy, s_kx, s_ky]
 
     # back to torch land
-    output = torch.Tensor(anchors).view(-1, 4)
+    output = torch.tensor(anchors, device=device).view(-1, 4)
     if clip:
         output.clamp_(max=1, min=0)
     return output
