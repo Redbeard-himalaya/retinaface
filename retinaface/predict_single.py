@@ -36,24 +36,6 @@ class Model:
         self.transform = Transformer(max_size=max_size)
         self.extract = Extractor(resize=face_size, margin=margin)
         self.variance = (0.1, 0.2)
-        self.face_size = face_size
-        # self.original_width = batch_width
-        # self.original_height = batch_height
-        # transformed_height, transformed_width = self.transform(
-        #     image=torch.empty((3, batch_height, batch_width), device=self.device),
-        # ).shape[-2:]
-        # transformed_size = (transformed_width, transformed_height)
-        # self.scale_landmarks = torch.tensor(transformed_size, device=self.device)\
-        #                        .tile((5,)).reshape(5, 2)
-        # self.scale_bboxes = torch.tensor(transformed_size, device=self.device).tile((2,))
-        # self.resize_coeff = self.original_height / transformed_height
-        # self.batch_prior_box = priorbox(
-        #     min_sizes=[[16, 32], [64, 128], [256, 512]],
-        #     steps=[8, 16, 32],
-        #     clip=False,
-        #     image_size=(transformed_height, transformed_width),
-        #     device=device,
-        # )
 
     def load_state_dict(self, state_dict: OrderedDict) -> None:
         self.model.load_state_dict(state_dict)
@@ -159,12 +141,9 @@ class Model:
         Params: image - torch.Tensor: a batch of images in shape CxHxW
         """
         batches, boxes, landmarks, scores = self.predict_jsons(image)
-        if boxes.shape[0] > 0:
-            faces = self.extract(images=image.unsqueeze(0),
-                                 batch_ids=batches,
-                                 bboxes=boxes,
-                                 landmarks=landmarks)
-            return faces, boxes, landmarks, scores
-        else:
-            return torch.empty([0, 3, self.face_size, self.face_size]), boxes, landmarks, scores
+        faces = self.extract(images=image.unsqueeze(0),
+                             batch_ids=batches,
+                             bboxes=boxes,
+                             landmarks=landmarks)
+        return faces, boxes, landmarks, scores
 

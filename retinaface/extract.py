@@ -34,6 +34,8 @@ class Extractor:
             raise ValueError(f"images {images.shape} is not in NxCxHxW shape")
         if bboxes.shape[0] != batch_ids.shape[0]:
             raise ValueError(f"bboxes {bboxes.shape} num does not equal to batch_ids {batch_ids.shape} num")
+        if len(batch_ids) == 0:
+            return torch.empty([0, 3, self.resize, self.resize], dtype=torch.float32)
         # resized_crop is faster against float32 images
         images = images.to(torch.float32)
         # bboxes = self.add_bboxes_margin(images=images,
