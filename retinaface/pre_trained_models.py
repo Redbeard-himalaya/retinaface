@@ -39,7 +39,10 @@ def get_model(model_name: str,
                                                   margin=margin,
                                                   device=device)
     else:
-        model = models[model_name].model["single"](max_size=max_size, device=device)
+        model = models[model_name].model["single"](max_size=max_size,
+                                                   face_size=face_size,
+                                                   margin=margin,
+                                                   device=device)
     weight_file = cached_path(models[model_name].url, cache_dir=model_dir.resolve(), quiet=quiet)
     if device == "cpu":
         state_dict = torch.load(

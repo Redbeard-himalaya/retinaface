@@ -1,128 +1,170 @@
 """There is a lot of post processing of the predictions."""
 from collections import OrderedDict
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Tuple
 
-import albumentations as A
-import numpy as np
 import torch
 from torch.nn import functional as F
-from torchvision.ops import nms
+from torchvision.ops import nms, batched_nms
 
-from retinaface.box_utils import decode, decode_landm
+from retinaface.box_utils import decode_batch, decode_landm_batch
 from retinaface.network import RetinaFace
 from retinaface.prior_box import priorbox
-from retinaface.utils import tensor_from_rgb_image
+from retinaface.transform import Transformer, clip_boxes
+from retinaface.extract import Extractor
 
 ROUNDING_DIGITS = 2
 
 
 class Model:
-    def __init__(self, max_size: int = 960, device: str = None) -> None:
-        self.model = RetinaFace(
-            name="Resnet50",
-            pretrained=False,
-            return_layers={"layer2": 1, "layer3": 2, "layer4": 3},
-            in_channels=256,
-            out_channels=256,
-        ).to(device)
+    def __init__(self,
+                 max_size: int = 960,
+                 face_size: int = 112,
+                 margin: int = 0,
+                 device: str = None,
+    ) -> None:
         if device is None:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             self.device = device
-        self.transform = A.Compose([A.LongestMaxSize(max_size=max_size, p=1), A.Normalize(p=1)])
-        self.max_size = max_size
-        self.variance = [0.1, 0.2]
+        self.model = RetinaFace(
+            name="Resnet50",
+            pretrained=False,
+            return_layers={"layer2": '1', "layer3": '2', "layer4": '3'},
+            in_channels=256,
+            out_channels=256,
+        ).to(device=self.device)
+        self.transform = Transformer(max_size=max_size)
+        self.extract = Extractor(resize=face_size, margin=margin)
+        self.variance = (0.1, 0.2)
+        self.face_size = face_size
+        # self.original_width = batch_width
+        # self.original_height = batch_height
+        # transformed_height, transformed_width = self.transform(
+        #     image=torch.empty((3, batch_height, batch_width), device=self.device),
+        # ).shape[-2:]
+        # transformed_size = (transformed_width, transformed_height)
+        # self.scale_landmarks = torch.tensor(transformed_size, device=self.device)\
+        #                        .tile((5,)).reshape(5, 2)
+        # self.scale_bboxes = torch.tensor(transformed_size, device=self.device).tile((2,))
+        # self.resize_coeff = self.original_height / transformed_height
+        # self.batch_prior_box = priorbox(
+        #     min_sizes=[[16, 32], [64, 128], [256, 512]],
+        #     steps=[8, 16, 32],
+        #     clip=False,
+        #     image_size=(transformed_height, transformed_width),
+        #     device=device,
+        # )
 
     def load_state_dict(self, state_dict: OrderedDict) -> None:
         self.model.load_state_dict(state_dict)
 
     def eval(self) -> None:  # noqa: A003
-        self.model.eval()
+        if self.device == "cpu":
+            self.model = torch.jit.optimize_for_inference(torch.jit.script(self.model.eval()))
+        else:
+            # torch.jit.optimize_for_inference fails on GPU
+            # https://discuss.pytorch.org/t/using-optimize-for-inference-on-torchscript-model-causes-error/196384/1
+            self.model = torch.jit.script(self.model.eval())
 
+
+    @torch.inference_mode
+    @torch.jit.optimized_execution(True)
     def predict_jsons(
-        self, image: np.ndarray, confidence_threshold: float = 0.7, nms_threshold: float = 0.4
-    ) -> List[Dict[str, Union[List, float]]]:
-        with torch.no_grad():
-            original_height, original_width = image.shape[:2]
+            self,
+            image: torch.Tensor,
+            confidence_threshold: float = 0.7,
+            nms_threshold: float = 0.4,
+    ) -> Tuple[torch.Tensor]:
+        # test against 2048 max_size, 180 batch_size, achive 0.10s/f, vRAM usage 14.7G
+        # torch cuda time measure
+        # https://discuss.pytorch.org/t/how-to-measure-time-in-pytorch/26964
+        # how does torch cuda behavior
+        # https://discuss.pytorch.org/t/escaping-if-statement-synchronization/130263/5
+        if image.dim() != 3:
+            raise ValueError(f"image tensor {image.shape} is not in CxHxW dimension")
 
-            transformed_image = self.transform(image=image)["image"]
+        original_height, original_width = image.shape[-2:]
 
-            transformed_height, transformed_width = transformed_image.shape[:2]
+        # import pdb; pdb.set_trace()
+        with torch.autocast(device_type=str(self.device), enabled=(self.device=="cuda")):
+            transformed_image = self.transform(image=image.unsqueeze(0))
+            transformed_height, transformed_width = transformed_image.shape[-2:]
             transformed_size = (transformed_width, transformed_height)
-
-            scale_landmarks = torch.from_numpy(np.tile(transformed_size, 5)).to(self.device)
-            scale_bboxes = torch.from_numpy(np.tile(transformed_size, 2)).to(self.device)
-
-            prior_box = priorbox(
+            scale_landmarks = torch.tensor(transformed_size, device=self.device)\
+                                   .tile((5,)).reshape(5, 2)
+            scale_bboxes = torch.tensor(transformed_size, device=self.device).tile((2,))
+            resize_coeff = original_height / transformed_height
+            batch_prior_box = priorbox(
                 min_sizes=[[16, 32], [64, 128], [256, 512]],
                 steps=[8, 16, 32],
                 clip=False,
-                image_size=transformed_image.shape[:2],
-            ).to(self.device)
+                image_size=(transformed_height, transformed_width),
+                device=self.device,
+            )
 
-            torched_image = tensor_from_rgb_image(transformed_image).to(self.device)
+            locs, confs, lands = self.model(transformed_image)
 
-            loc, conf, land = self.model(torched_image.unsqueeze(0))  # pylint: disable=E1102
+            # shapes batch_boxes BxPx4, batch_landmarks BxPx10, batch_scores BxP
+            batch_boxes = decode_batch(locs,
+                                       batch_prior_box,
+                                       self.variance)
+            batch_landmarks = decode_landm_batch(
+                lands,
+                batch_prior_box,
+                self.variance,
+            ).reshape(-1, batch_prior_box.shape[0], 5, 2)
+            batch_scores = F.softmax(confs, dim=-1)[:,:,1]
 
-            conf = F.softmax(conf, dim=-1)
+            # filter out valid scores, boxes, and landmarks
+            batch_num = batch_scores.shape[0]
+            highscore_batches, highscore_indeces = torch.where(
+                batch_scores > confidence_threshold
+            )
+            # highscores.shape: Nx1
+            highscores = batch_scores[highscore_batches, highscore_indeces]
+            # highscore_boxes.shape: Nx4
+            highscore_boxes = batch_boxes[highscore_batches, highscore_indeces]
+            keep = batched_nms(boxes=highscore_boxes,
+                               scores=highscores,
+                               idxs=highscore_batches,
+                               iou_threshold=nms_threshold)
+            valid_batches = highscore_batches[keep]
+            valid_scores = highscores[keep].round(decimals=ROUNDING_DIGITS)
+            valid_boxes = clip_boxes(
+                boxes=highscore_boxes[keep] * scale_bboxes,
+                image_width=original_width,
+                image_height=original_height,
+                resize_coeff=resize_coeff,
+            ).round(decimals=ROUNDING_DIGITS)
+            # convert format XYXY to XYWH
+            valid_boxes[:,[2,3]] = valid_boxes[:,[2,3]] - valid_boxes[:,[0,1]]
+            valid_landmarks = (
+                batch_landmarks[highscore_batches, highscore_indeces][keep] \
+                * scale_landmarks * resize_coeff
+            ).round(decimals=ROUNDING_DIGITS)
 
-            annotations: List[Dict[str, Union[List, float]]] = []
+            # batches is used as index so good on cpu
+            # boxes is used to crop and tag targate so good on cpu
+            return valid_batches.cpu(), valid_boxes.cpu(), valid_landmarks, valid_scores
 
-            boxes = decode(loc.data[0], prior_box, self.variance)
 
-            boxes *= scale_bboxes
-            scores = conf[0][:, 1]
+    def predict(
+            self,
+            image: torch.Tensor,
+            confidence_threshold: float = 0.7,
+            nms_threshold: float = 0.4,
+            
+    ) -> Tuple[torch.Tensor]:
+        """This is a wrapper of predict_jsons and extract
+        Params: image - torch.Tensor: a batch of images in shape CxHxW
+        """
+        batches, boxes, landmarks, scores = self.predict_jsons(image)
+        if boxes.shape[0] > 0:
+            faces = self.extract(images=image.unsqueeze(0),
+                                 batch_ids=batches,
+                                 bboxes=boxes,
+                                 landmarks=landmarks)
+            return faces, boxes, landmarks, scores
+        else:
+            return torch.empty([0, 3, self.face_size, self.face_size]), boxes, landmarks, scores
 
-            landmarks = decode_landm(land.data[0], prior_box, self.variance)
-            landmarks *= scale_landmarks
-
-            # ignore low scores
-            valid_index = torch.where(scores > confidence_threshold)[0]
-            boxes = boxes[valid_index]
-            landmarks = landmarks[valid_index]
-            scores = scores[valid_index]
-
-            # do NMS
-            keep = nms(boxes, scores, nms_threshold)
-            boxes = boxes[keep, :]
-
-            if boxes.shape[0] == 0:
-                return [{"bbox": [], "score": -1, "landmarks": []}]
-
-            landmarks = landmarks[keep]
-
-            scores = scores[keep].cpu().numpy().astype(float)
-
-            boxes_np = boxes.cpu().numpy()
-            landmarks_np = landmarks.cpu().numpy()
-            resize_coeff = original_height / transformed_height
-
-            boxes_np *= resize_coeff
-            landmarks_np = landmarks_np.reshape(-1, 10) * resize_coeff
-
-            for box_id, bbox in enumerate(boxes_np):
-                x_min, y_min, x_max, y_max = bbox
-
-                x_min = np.clip(x_min, 0, original_width - 1)
-                x_max = np.clip(x_max, x_min + 1, original_width - 1)
-
-                if x_min >= x_max:
-                    continue
-
-                y_min = np.clip(y_min, 0, original_height - 1)
-                y_max = np.clip(y_max, y_min + 1, original_height - 1)
-
-                if y_min >= y_max:
-                    continue
-
-                annotations += [
-                    {
-                        "bbox": np.round(bbox.astype(float), ROUNDING_DIGITS).tolist(),
-                        "score": np.round(scores, ROUNDING_DIGITS)[box_id],
-                        "landmarks": np.round(landmarks_np[box_id].astype(float), ROUNDING_DIGITS)
-                        .reshape(-1, 2)
-                        .tolist(),
-                    }
-                ]
-
-            return annotations
