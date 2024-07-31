@@ -130,6 +130,7 @@ class Model:
             return valid_batches.cpu(), valid_boxes.cpu(), valid_landmarks, valid_scores
 
 
+    @torch.inference_mode
     def predict(
             self,
             image: torch.Tensor,
@@ -145,5 +146,6 @@ class Model:
                              batch_ids=batches,
                              bboxes=boxes,
                              landmarks=landmarks)
+        boxes[:,2:] += boxes[:,:2]
         return faces, boxes, landmarks, scores
 
