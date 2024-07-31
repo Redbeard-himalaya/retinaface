@@ -43,6 +43,8 @@ def get_model(model_name: str,
                                                    face_size=face_size,
                                                    margin=margin,
                                                    device=device)
+    if model_dir is None:
+        model_dir = Path.home() / ".face_search"
     weight_file = cached_path(models[model_name].url, cache_dir=model_dir.resolve(), quiet=quiet)
     if device == "cpu":
         state_dict = torch.load(
