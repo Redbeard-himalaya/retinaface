@@ -82,8 +82,9 @@ class Extractor:
         # bboxes in format XYWH
         m = (bboxes[:,[2,3]] - bboxes[:,[0,1]]) * ratio
         # adjust margin
-        bboxes[:,[0,1]] -= m
-        bboxes[:,[2,3]] += m
+        # bboxes[:,[0,1]] -= m
+        # bboxes[:,[2,3]] += m
+        bboxes += torch.cat([-m, m], dim=1)
         # clip x to [0, w]
         bboxes[:,[0,2]] = bboxes[:,[0,2]].clip(min=0, max=w)
         # clip y to [0, h]
