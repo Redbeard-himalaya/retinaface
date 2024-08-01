@@ -1,6 +1,6 @@
+from typing import Tuple
 import torch
 from torch.nn import functional as F
-# from torchvision.ops import clip_boxes_to_image
 from torchvision.transforms.functional import resized_crop
 
 @torch.jit.script
@@ -15,7 +15,7 @@ class Extractor:
                  bboxes: torch.Tensor,
                  landmarks: torch.Tensor,
                  batch_ids: torch.Tensor,
-    ):
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Extract faces from images located in bounding box bboxes, then resize and align faces
         Parameters:
         images - tensor in shape Bx3xHxW
@@ -35,18 +35,17 @@ class Extractor:
         if bboxes.shape[0] != batch_ids.shape[0]:
             raise ValueError(f"bboxes {bboxes.shape} num does not equal to batch_ids {batch_ids.shape} num")
         if len(batch_ids) == 0:
-            return torch.empty([0, 3, self.resize, self.resize], dtype=torch.float32)
-        # resized_crop is faster against float32 images
+            return (torch.empty([0, 3, self.resize, self.resize], dtype=torch.float32),
+                    torch.empty([0, 4], dtype=torch.int)) 
+        # resized_crop is faster on float32 images
         images = images.to(torch.float32)
-        # bboxes = self.add_bboxes_margin(images=images,
-        #                                 bboxes=bboxes,
-        #                                 margin=self.margin,
-        #                                 resize=self.resize).to(torch.int)
+        # bboxes is adjusted in-place
         self.add_bboxes_margin(bboxes=bboxes,
                                images=images,
                                margin=self.margin,
                                resize=self.resize)
-        bboxes = bboxes.to(torch.int)
+        # convert to int on CPU is faster
+        bboxes = bboxes.cpu().to(torch.int)
         # crops in shape: BATCH_IDS.NUM x RESIZE x RESIZE, dtype: float32
         crops = images.new_empty((bboxes.shape[0], 3) + (self.resize,self.resize))
         empty_crop = images.new_empty((0, 3) + (self.resize,self.resize))
@@ -55,37 +54,15 @@ class Extractor:
             _crops = [empty_crop]
             idx = torch.where(batch_ids == i)
             for box in bboxes[idx]:
-                x, y, w, h = box[0], box[1], box[2], box[3]
+                x0, y0, x1, y1 = box[0], box[1], box[2], box[3]
                 _crops.append(
                     resized_crop(img=image,
-                                 left=x, top=y, width=w, height=h,
+                                 left=x0, top=y0, width=x1-x0, height=y1-y0,
                                  size=[self.resize,self.resize]).unsqueeze(0)
                 )
             crops[idx] = torch.cat(_crops, dim=0)
         # alignment require crops.dtype in torch.float32, otherwise fails at affine_grid
-        return self.alignment(crops, landmarks)#, bboxes
-
-
-    # def add_bboxes_margin(self,
-    #                       images: torch.Tensor,
-    #                       bboxes: torch.Tensor,
-    #                       margin: int = 0,
-    #                       resize: int = 160,
-    # )-> torch.Tensor:
-    #     """bboxes in format XYWH
-    #     """
-    #     h, w = images.shape[-2:]
-    #     bb = bboxes.clone()
-    #     ratio = 0.5 * margin / (resize - margin)
-    #     # bb in format XYWH
-    #     m = bb[:,[2,3]] * ratio
-    #     # convert bb to format XYXY
-    #     bb[:,[2,3]] = bb[:,[0,1]] + bb[:,[2,3]] + m
-    #     bb[:,[0,1]] -= m
-    #     bb = clip_boxes_to_image(boxes=bb, size=(h,w))
-    #     # convert bb format back to XYWH
-    #     bb[:,[2,3]] -= bb[:,[0,1]]
-    #     return bb
+        return self.alignment(crops, landmarks), bboxes
 
 
     def add_bboxes_margin(self,
@@ -94,7 +71,7 @@ class Extractor:
                           margin: int = 0,
                           resize: int = 160,
     ):
-        """bboxes in format XYWH
+        """bboxes in format XYXY
            bboxes is modified by this function
            the above old one is deprecated because torchvision.ops.clip_boxes_to_image
            cause a lot of VRAM and slow down.
@@ -103,16 +80,14 @@ class Extractor:
         #bb = bboxes
         ratio = 0.5 * margin / (resize - margin)
         # bboxes in format XYWH
-        m = bboxes[:,[2,3]] * ratio
-        # convert bboxes to format XYXY
-        bboxes[:,[2,3]] = bboxes[:,[0,1]] + bboxes[:,[2,3]] + m
+        m = (bboxes[:,[2,3]] - bboxes[:,[0,1]]) * ratio
+        # adjust margin
         bboxes[:,[0,1]] -= m
+        bboxes[:,[2,3]] += m
         # clip x to [0, w]
         bboxes[:,[0,2]] = bboxes[:,[0,2]].clip(min=0, max=w)
         # clip y to [0, h]
         bboxes[:,[1,3]] = bboxes[:,[1,3]].clip(min=0, max=h)
-        # convert bboxes format back to XYWH
-        bboxes[:,[2,3]] -= bboxes[:,[0,1]]
 
 
     def alignment(self,

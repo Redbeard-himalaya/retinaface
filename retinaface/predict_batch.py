@@ -1,6 +1,6 @@
 """There is a lot of post processing of the predictions."""
 from collections import OrderedDict
-from typing import Dict, List, Union, Tuple
+from typing import Dict, Tuple
 
 import torch
 from torch.nn import functional as F
@@ -129,8 +129,6 @@ class Model:
                 image_height=self.original_height,
                 resize_coeff=self.resize_coeff,
             ).round(decimals=ROUNDING_DIGITS)
-            # convert format XYXY to XYWH
-            valid_boxes[:,[2,3]] = valid_boxes[:,[2,3]] - valid_boxes[:,[0,1]]
             valid_landmarks = (
                 batch_landmarks[highscore_batches, highscore_indeces][keep] \
                 * self.scale_landmarks * self.resize_coeff
@@ -138,7 +136,7 @@ class Model:
 
             # batches is used as index so good on cpu
             # boxes is used to crop and tag targate so good on cpu
-            return valid_batches.cpu(), valid_boxes.cpu(), valid_landmarks, valid_scores
+            return valid_batches.cpu(), valid_boxes, valid_landmarks, valid_scores
 
 
     @torch.inference_mode
@@ -153,7 +151,9 @@ class Model:
         Params: image - torch.Tensor: a batch of images in shape BxCxHxW
         """
         batches, boxes, landmarks, scores = self.predict_jsons(image)
-        faces = self.extract(images=image, batch_ids=batches, bboxes=boxes, landmarks=landmarks)
-        boxes[:,2:] += boxes[:,:2]
+        faces, bboxes = self.extract(images=image,
+                                     batch_ids=batches,
+                                     bboxes=boxes,
+                                     landmarks=landmarks)
         return faces, batches, boxes, landmarks, scores
 

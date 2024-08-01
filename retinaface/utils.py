@@ -46,12 +46,12 @@ def process_predictions(
         if _boxes.shape[0] > 0:
             annotations = [
                 {
-                    "bbox": [x, y, x + w, y + h],
+                    "bbox": [x0, y0, x1, y1],
                     "score": score,
                     "landmarks": landmark.tolist(),
                 }
-                for score, (x, y, w, h), landmark in zip(_scores, _boxes, _landmarks) \
-                if w > 0 and h > 0
+                for score, (x0, y0, x1, y1), landmark in zip(_scores, _boxes, _landmarks) \
+                if x1 > x0 and y1 > y0
             ]
         else:
             annotations = []
