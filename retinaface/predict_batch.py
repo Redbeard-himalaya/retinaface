@@ -1,6 +1,6 @@
 """There is a lot of post processing of the predictions."""
 from collections import OrderedDict
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Union
 
 import torch
 from torch.nn import functional as F
@@ -18,8 +18,6 @@ ROUNDING_DIGITS = 2
 class Model:
     def __init__(self,
                  max_size: int = 960,
-                 batch_width: int = None,
-                 batch_height: int = None,
                  face_size: int = 112,
                  margin: int = 0,
                  device: str = None,
@@ -38,23 +36,35 @@ class Model:
         self.transform = Transformer(max_size=max_size)
         self.extract = Extractor(resize=face_size, margin=margin)
         self.variance = (0.1, 0.2)
-        self.original_width = batch_width
-        self.original_height = batch_height
-        transformed_height, transformed_width = self.transform(
-            image=torch.empty((3, batch_height, batch_width), device=self.device),
-        ).shape[-2:]
-        transformed_size = (transformed_width, transformed_height)
-        self.scale_landmarks = torch.tensor(transformed_size, device=self.device)\
-                               .tile((5,)).reshape(5, 2)
-        self.scale_bboxes = torch.tensor(transformed_size, device=self.device).tile((2,))
-        self.resize_coeff = self.original_height / transformed_height
-        self.batch_prior_box = priorbox(
-            min_sizes=[[16, 32], [64, 128], [256, 512]],
-            steps=[8, 16, 32],
-            clip=False,
-            image_size=(transformed_height, transformed_width),
-            device=device,
-        )
+        self.set_params()
+
+    def set_params(self,
+                   batch_height: int = None,
+                   batch_width: int = None,
+                   transformed_height: int = None,
+                   transformed_width: int = None,
+    ):
+        if batch_height is None or batch_width is None:
+            self.original_width = None
+            self.original_height = None
+            self.scale_landmarks = None
+            self.scale_bboxes = None
+            self.resize_coeff = None
+            self.batch_prior_box = None
+        elif (self.original_height, self.original_width) != (batch_height, batch_width):
+            self.original_height, self.original_width = batch_height, batch_width
+            transformed_size = (transformed_width, transformed_height)
+            self.scale_landmarks = torch.tensor(transformed_size, device=self.device)\
+                                        .tile((5,)).reshape(5, 2)
+            self.scale_bboxes = torch.tensor(transformed_size, device=self.device).tile((2,))
+            self.resize_coeff = self.original_height / transformed_height
+            self.batch_prior_box = priorbox(
+                min_sizes=[[16, 32], [64, 128], [256, 512]],
+                steps=[8, 16, 32],
+                clip=False,
+                image_size=(transformed_height, transformed_width),
+                device=self.device,
+            )
 
     def load_state_dict(self, state_dict: OrderedDict) -> None:
         self.model.load_state_dict(state_dict)
@@ -96,6 +106,7 @@ class Model:
                 locs.append(loc)
                 confs.append(conf)
                 lands.append(land)
+            self.set_params(*image.shape[-2:], *transformed_image.shape[-2:])
 
             # shapes batch_boxes BxPx4, batch_landmarks BxPx10, batch_scores BxP
             batch_boxes = decode_batch(torch.cat(locs, dim=0),

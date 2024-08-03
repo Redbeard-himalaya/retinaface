@@ -20,9 +20,7 @@ models = {
 
 def get_model(model_name: str,
               max_size: int,
-              batch_model: bool = False,
-              batch_width: int = None,
-              batch_height: int = None,
+              batch_model: bool = True,
               face_size: int = 112,
               margin: int = 0,
               model_dir: Path = None,
@@ -33,8 +31,6 @@ def get_model(model_name: str,
         device = "cuda" if torch.cuda.is_available() else "cpu"
     if batch_model:
         model = models[model_name].model["batch"](max_size=max_size,
-                                                  batch_width=batch_width,
-                                                  batch_height=batch_height,
                                                   face_size=face_size,
                                                   margin=margin,
                                                   device=device)
