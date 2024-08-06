@@ -3,7 +3,6 @@ from pathlib import Path
 from cached_path import cached_path
 from collections import namedtuple
 import torch
-from torch.utils import model_zoo
 
 from retinaface.predict_single import Model as SingleModel
 from retinaface.predict_batch import Model as BatchModel
