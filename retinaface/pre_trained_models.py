@@ -45,11 +45,13 @@ def get_model(model_name: str,
         state_dict = torch.load(
             weight_file,
             map_location=lambda storage, loc: storage,
+            weights_only=True,
         )
     else:
         state_dict = torch.load(
             weight_file,
             map_location=lambda storage, loc: storage.cuda(torch.cuda.current_device()),
+            weights_only=True,
         )
     model.load_state_dict(state_dict)
     return model
