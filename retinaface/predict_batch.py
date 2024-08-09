@@ -75,7 +75,7 @@ class Model:
         else:
             # torch.jit.optimize_for_inference fails on GPU
             # https://discuss.pytorch.org/t/using-optimize-for-inference-on-torchscript-model-causes-error/196384/1
-            self.model = torch.jit.script(self.model.eval())
+            self.model = torch.compile(self.model.eval())
 
 
     @torch.inference_mode

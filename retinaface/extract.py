@@ -124,8 +124,11 @@ class Extractor:
         left_eye_y = landmark[:,0,1]  # batch in shape N
         right_eye_x = landmark[:,1,0] # batch in shape N
         right_eye_y = landmark[:,1,1] # batch in shape N
+        # complex.angle is little faster than atan2, but can not torch.compile
         angle = torch.complex(right_eye_x - left_eye_x,
                               right_eye_y - left_eye_y).angle() * 180 / torch.pi
+        # angle = torch.atan2(right_eye_y - left_eye_y,
+        #                     right_eye_x - left_eye_x) * 180 / torch.pi
         # rotate in batch
         img = self.batch_rotate(img, angle)
 
