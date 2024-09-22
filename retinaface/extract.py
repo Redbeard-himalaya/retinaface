@@ -1,12 +1,13 @@
-from typing import Tuple
+from typing import Tuple, Union
 import torch
 from torch.nn import functional as F
 from torchvision.transforms.functional import resized_crop
 
 @torch.jit.script
 class Extractor:
-    def __init__(self, resize: int, margin: int):
-        self.resize = resize
+    def __init__(self, resize: Union[int, Tuple[int, int]], margin: int):
+        # resize in HxW
+        self.resize = (resize,resize) if isinstance(resize, int) else resize
         self.margin = margin
 
     @torch.inference_mode
@@ -35,7 +36,7 @@ class Extractor:
         if bboxes.shape[0] != batch_ids.shape[0]:
             raise ValueError(f"bboxes {bboxes.shape} num does not equal to batch_ids {batch_ids.shape} num")
         if len(batch_ids) == 0:
-            return (torch.empty([0, 3, self.resize, self.resize], dtype=torch.float32),
+            return (torch.empty((0, 3) + self.resize, dtype=torch.float32),
                     torch.empty([0, 4], dtype=torch.int)) 
         # resized_crop is faster on float32 images
         images = images.to(torch.float32)
@@ -43,12 +44,12 @@ class Extractor:
         self.add_bboxes_margin(bboxes=bboxes,
                                images=images,
                                margin=self.margin,
-                               resize=self.resize)
+                               resize=self.resize[0])
         # convert to int on CPU is faster
         bboxes = bboxes.cpu().to(torch.int)
-        # crops in shape: BATCH_IDS.NUM x RESIZE x RESIZE, dtype: float32
-        crops = images.new_empty((bboxes.shape[0], 3) + (self.resize,self.resize))
-        empty_crop = images.new_empty((0, 3) + (self.resize,self.resize))
+        # crops in shape: BATCH_IDS.NUM x 3 x RESIZE x RESIZE, dtype: float32
+        crops = images.new_empty((bboxes.shape[0], 3) + self.resize)
+        empty_crop = images.new_empty((0, 3) + self.resize)
         # import pdb; pdb.set_trace()
         for i, image in enumerate(images):
             _crops = [empty_crop]
@@ -58,7 +59,7 @@ class Extractor:
                 _crops.append(
                     resized_crop(img=image,
                                  left=x0, top=y0, width=x1-x0, height=y1-y0,
-                                 size=[self.resize,self.resize]).unsqueeze(0)
+                                 size=list(self.resize)).unsqueeze(0)
                 )
             crops[idx] = torch.cat(_crops, dim=0)
         # alignment require crops.dtype in torch.float32, otherwise fails at affine_grid
